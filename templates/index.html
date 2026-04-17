@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AI-powered sentiment analysis and fake review detection using deep learning LSTM models." />
+    <title>ReviewGuard AI — Sentiment &amp; Fake Review Detector</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- App styles -->
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+    <!-- ── Animated background blobs ── -->
+    <div class="bg-blobs" aria-hidden="true">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <main class="container">
+        <!-- ── Header ── -->
+        <header class="header" id="app-header">
+            <div class="logo-badge">
+                <span class="logo-icon">🛡️</span>
+            </div>
+            <h1>ReviewGuard <span class="accent">AI</span></h1>
+            <p class="subtitle">Deep-learning powered sentiment analysis &amp; fake review detection</p>
+        </header>
+
+        <!-- ── Input Section ── -->
+        <section class="card input-card" id="input-section">
+            <label for="review-input" class="input-label">Paste or type a review</label>
+            <textarea
+                id="review-input"
+                class="review-textarea"
+                rows="5"
+                placeholder="e.g. This product exceeded all my expectations…"
+                maxlength="2000"
+            ></textarea>
+            <div class="input-footer">
+                <span id="char-count" class="char-count">0 / 2000</span>
+                <button id="analyze-btn" class="btn-analyze" type="button">
+                    <span class="btn-text">Analyze Review</span>
+                    <span class="btn-icon">→</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- ── Loading Spinner ── -->
+        <div id="loader" class="loader-wrapper hidden" aria-label="Analyzing review">
+            <div class="spinner"></div>
+            <p class="loader-text">Analyzing with LSTM model…</p>
+        </div>
+
+        <!-- ── Results Section ── -->
+        <section id="results-section" class="results-section hidden">
+
+            <!-- Star Rating -->
+            <div class="card rating-card" id="rating-card">
+                <h2 class="section-title">Overall Rating</h2>
+                <div id="star-display" class="star-display"></div>
+                <p id="star-value" class="star-value"></p>
+            </div>
+
+            <!-- Sentiment & Fake Detection Cards -->
+            <div class="results-grid">
+                <div class="card result-card" id="sentiment-card">
+                    <div class="card-header">
+                        <span class="card-icon" id="sentiment-icon">😐</span>
+                        <h2>Sentiment</h2>
+                    </div>
+                    <div id="sentiment-label" class="result-label"></div>
+                    <div class="confidence-bar-wrap">
+                        <div id="sentiment-bar" class="confidence-bar"></div>
+                    </div>
+                    <p id="sentiment-confidence" class="result-confidence"></p>
+                    <p id="sentiment-reason" class="result-reason"></p>
+                </div>
+
+                <div class="card result-card" id="fake-card">
+                    <div class="card-header">
+                        <span class="card-icon" id="fake-icon">🔍</span>
+                        <h2>Authenticity</h2>
+                    </div>
+                    <div id="fake-label" class="result-label"></div>
+                    <div class="confidence-bar-wrap">
+                        <div id="fake-bar" class="confidence-bar"></div>
+                    </div>
+                    <p id="fake-confidence" class="result-confidence"></p>
+                    <p id="fake-reason" class="result-reason"></p>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div class="card chart-card" id="chart-card">
+                <h2 class="section-title">Confidence Breakdown</h2>
+                <div class="chart-container">
+                    <canvas id="confidence-chart"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <p>Built with Flask · TensorFlow · LSTM · Chart.js</p>
+    </footer>
+
+    <!-- App logic -->
+    <script src="/static/script.js"></script>
+</body>
+</html>

@@ -1,31 +1,21 @@
 """
 Sentiment Analysis & Fake Review Detection — Flask Backend
-Uses LSTM (TensorFlow/Keras) for both sentiment and fake-review classification,
-combined with heuristic rules for improved fake-review detection.
+Uses TF-IDF + Logistic Regression for fast, reliable classification.
+Combined with heuristic rules for improved fake-review detection.
 """
 
 import os
 import re
-import json
 import numpy as np
 import mysql.connector
-
-# Suppress TF warnings for cleaner output
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+from collections import Counter
 
 from flask import Flask, render_template, request, jsonify
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout, Bidirectional
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
 
 app = Flask(__name__)
-
-# ─── Configuration ───────────────────────────────────────────────────────────
-MAX_WORDS = 5000
-MAX_LEN = 100
-EMBEDDING_DIM = 64
 
 # ─── Database Configuration ──────────────────────────────────────────────────
 DB_CONFIG = {
@@ -140,50 +130,33 @@ fake_texts = [
 
 fake_labels = [0]*15 + [1]*15
 
-# ─── Build & Train Models ────────────────────────────────────────────────────
+# ─── Train Models (fast: TF-IDF + Logistic Regression) ───────────────────────
 
-def build_lstm_model(vocab_size: int, num_classes: int) -> Sequential:
-    """Build a Bidirectional LSTM classifier."""
-    model = Sequential([
-        Embedding(vocab_size, EMBEDDING_DIM, input_length=MAX_LEN),
-        Bidirectional(LSTM(64, return_sequences=True)),
-        Dropout(0.3),
-        Bidirectional(LSTM(32)),
-        Dropout(0.3),
-        Dense(32, activation="relu"),
-        Dense(num_classes, activation="softmax"),
-    ])
-    model.compile(
-        optimizer="adam",
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
-    )
-    return model
-
-
-print("[*] Training Sentiment LSTM model...")
-sent_tokenizer = Tokenizer(num_words=MAX_WORDS, oov_token="<OOV>")
-sent_tokenizer.fit_on_texts(sentiment_texts)
-sent_sequences = sent_tokenizer.texts_to_sequences(sentiment_texts)
-sent_padded = pad_sequences(sent_sequences, maxlen=MAX_LEN, padding="post", truncating="post")
-sent_labels_arr = np.array(sentiment_labels)
-
-sentiment_model = build_lstm_model(MAX_WORDS, 3)
-sentiment_model.fit(sent_padded, sent_labels_arr, epochs=50, batch_size=4, verbose=0)
+print("[*] Training Sentiment model...")
+sentiment_pipeline = Pipeline([
+    ('tfidf', TfidfVectorizer(ngram_range=(1, 2), max_features=5000)),
+    ('clf', LogisticRegression(max_iter=500, C=1.0, solver='lbfgs')),
+])
+sentiment_pipeline.fit(sentiment_texts, sentiment_labels)
 print("[OK] Sentiment model ready")
 
-print("[*] Training Fake-Review LSTM model...")
-fake_tokenizer = Tokenizer(num_words=MAX_WORDS, oov_token="<OOV>")
-fake_tokenizer.fit_on_texts(fake_texts)
-fake_sequences = fake_tokenizer.texts_to_sequences(fake_texts)
-fake_padded = pad_sequences(fake_sequences, maxlen=MAX_LEN, padding="post", truncating="post")
-fake_labels_arr = np.array(fake_labels)
-
-fake_model = build_lstm_model(MAX_WORDS, 2)
-fake_model.fit(fake_padded, fake_labels_arr, epochs=50, batch_size=4, verbose=0)
+print("[*] Training Fake-Review model...")
+fake_pipeline = Pipeline([
+    ('tfidf', TfidfVectorizer(ngram_range=(1, 2), max_features=5000)),
+    ('clf', LogisticRegression(max_iter=500, C=1.0, solver='lbfgs')),
+])
+fake_pipeline.fit(fake_texts, fake_labels)
 print("[OK] Fake-review model ready")
 
 # ─── Heuristic Helpers ───────────────────────────────────────────────────────
+
+def _has_repetition(text: str) -> bool:
+    words = text.lower().split()
+    if len(words) < 4:
+        return False
+    counts = Counter(words)
+    most_common_count = counts.most_common(1)[0][1]
+    return most_common_count / len(words) > 0.4
 
 FAKE_SIGNALS = {
     "excessive_caps": (
@@ -211,16 +184,6 @@ FAKE_SIGNALS = {
         "Appears to be an incentivised review",
     ),
 }
-
-
-def _has_repetition(text: str) -> bool:
-    words = text.lower().split()
-    if len(words) < 4:
-        return False
-    from collections import Counter
-    counts = Counter(words)
-    most_common_count = counts.most_common(1)[0][1]
-    return most_common_count / len(words) > 0.4
 
 
 def heuristic_fake_score(text: str):
@@ -268,21 +231,22 @@ def analyze():
         return jsonify({"error": "Review text is required."}), 400
 
     # ── Sentiment prediction ──
-    seq = sent_tokenizer.texts_to_sequences([text])
-    padded = pad_sequences(seq, maxlen=MAX_LEN, padding="post", truncating="post")
-    sent_pred = sentiment_model.predict(padded, verbose=0)[0]
+    sent_proba = sentiment_pipeline.predict_proba([text])[0]
+    # Classes order from pipeline: 0=Negative, 1=Neutral, 2=Positive
+    classes = list(sentiment_pipeline.classes_)
+    neg_conf = float(sent_proba[classes.index(0)])
+    neu_conf = float(sent_proba[classes.index(1)])
+    pos_conf = float(sent_proba[classes.index(2)])
 
-    neg_conf, neu_conf, pos_conf = float(sent_pred[0]), float(sent_pred[1]), float(sent_pred[2])
-    sent_idx = int(np.argmax(sent_pred))
-    sent_label = ["Negative", "Neutral", "Positive"][sent_idx]
-    sent_confidence = float(sent_pred[sent_idx])
+    sent_idx = int(np.argmax(sent_proba))
+    sent_label = ["Negative", "Neutral", "Positive"][classes[sent_idx]]
+    sent_confidence = float(sent_proba[sent_idx])
 
-    # ── Fake detection (DL) ──
-    f_seq = fake_tokenizer.texts_to_sequences([text])
-    f_padded = pad_sequences(f_seq, maxlen=MAX_LEN, padding="post", truncating="post")
-    fake_pred = fake_model.predict(f_padded, verbose=0)[0]
-    dl_genuine_conf = float(fake_pred[0])
-    dl_fake_conf = float(fake_pred[1])
+    # ── Fake detection (ML) ──
+    fake_proba = fake_pipeline.predict_proba([text])[0]
+    fake_classes = list(fake_pipeline.classes_)
+    dl_genuine_conf = float(fake_proba[fake_classes.index(0)])
+    dl_fake_conf = float(fake_proba[fake_classes.index(1)])
 
     # ── Fake detection (heuristic boost) ──
     h_boost, h_reasons = heuristic_fake_score(text)
@@ -298,7 +262,7 @@ def analyze():
         if h_reasons:
             fake_reason = "Flagged as potentially fake: " + "; ".join(h_reasons) + "."
         else:
-            fake_reason = "The deep-learning model detected patterns commonly seen in fake reviews."
+            fake_reason = "The model detected patterns commonly seen in fake reviews."
     else:
         fake_reason = "The review appears authentic with natural language patterns and specific details."
 
@@ -310,8 +274,6 @@ def analyze():
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
-            # Storing the input sentence (text), sentiments, and fake labels into the 'review' table.
-            # Adjust column names below if they differ in your actual database table.
             sql = """
                 INSERT INTO reviews 
                 (review_text, sentiment_label, sentiment_confidence, fake_label, fake_confidence, stars)
